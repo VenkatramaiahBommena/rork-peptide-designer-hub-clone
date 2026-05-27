@@ -11,21 +11,15 @@ import {
   LogOut,
   Menu,
   X,
-  Beaker,
-  Database,
 } from "lucide-react";
 import { useState } from "react";
-import { SearchBar } from "@/components/SearchBar";
 
 const navItems = [
   { path: "/", label: "Home", icon: Dna },
   { path: "/generator", label: "Generator", icon: FlaskConical },
   { path: "/results", label: "Results", icon: Dna },
   { path: "/alignment", label: "Alignment", icon: AlignCenter },
-  { path: "/resources", label: "Resources", icon: Database },
 ];
-
-const cdmoNav = { path: "/#cdmo-services", label: "CDMO Services", icon: Beaker };
 
 export function Navbar() {
   const { user, signOut } = useAuth();
@@ -49,43 +43,21 @@ export function Navbar() {
 
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => {
-              const isActive = item.path === "/resources" 
-                ? location.pathname === "/resources"
-                : location.pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                    isActive
-                      ? "bg-[#00d4aa]/15 text-[#00d4aa]"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-                  )}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-            <Link
-              to={cdmoNav.path}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                location.hash === "#cdmo-services"
-                  ? "bg-[#f59e0b]/15 text-[#f59e0b]"
-                  : "text-muted-foreground hover:text-[#f59e0b] hover:bg-[#f59e0b]/5",
-              )}
-            >
-              <cdmoNav.icon className="w-4 h-4" />
-              {cdmoNav.label}
-            </Link>
-          </div>
-
-          {/* Search */}
-          <div className="hidden md:flex items-center gap-2">
-            <SearchBar />
+            {navItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                  location.pathname === item.path
+                    ? "bg-[#00d4aa]/15 text-[#00d4aa]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                )}
+              >
+                <item.icon className="w-4 h-4" />
+                {item.label}
+              </Link>
+            ))}
           </div>
 
           {/* Auth */}
@@ -155,19 +127,6 @@ export function Navbar() {
                 {item.label}
               </Link>
             ))}
-            <Link
-              to={cdmoNav.path}
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                "flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
-                location.hash === "#cdmo-services"
-                  ? "bg-[#f59e0b]/15 text-[#f59e0b]"
-                  : "text-muted-foreground hover:text-[#f59e0b]",
-              )}
-            >
-              <cdmoNav.icon className="w-4 h-4" />
-              {cdmoNav.label}
-            </Link>
             {user ? (
               <>
                 <Link

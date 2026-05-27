@@ -11,7 +11,6 @@ import Results from "./pages/Results";
 import Alignment from "./pages/Alignment";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
-import Resources from "./pages/Resources";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -34,7 +33,6 @@ const App = () => (
           <Route path="/alignment" element={<Alignment />} />
           <Route path="/login" element={<Login />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/resources" element={<Resources />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
