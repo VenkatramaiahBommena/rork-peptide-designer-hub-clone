@@ -1,0 +1,24 @@
+name = "peptide-functions"
+main = "index.ts"
+compatibility_date = "2024-01-01"
+account_id = "your-account-id"
+workers_dev = true
+
+[env.production]
+route = "https://api.example.com/*"
+
+[env.development]
+name = "peptide-functions-dev"
+
+[[triggers.crons]]
+cron = "0 * * * *"
+
+[build]
+command = "npm run build"
+cwd = "./"
+
+[build.upload]
+format = "service-worker"
+
+[env.production.triggers.crons]
+cron = "0 */6 * * *"
