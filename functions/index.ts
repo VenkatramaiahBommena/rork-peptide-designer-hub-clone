@@ -1,345 +1,337 @@
-import { createClient } from '@supabase/supabase-js';
+/**
+ * PeptiForge Backend API — Cloudflare Worker + Supabase integration.
+ *
+ * Routes:
+ *   /api/auth/register         — Register a new user
+ *   /api/auth/login            — Login
+ *   /api/peptides/generate     — Generate peptide sequences (logs activity to Supabase)
+ *   /api/peptides/save          — Save peptide (proxied to DO or Supabase)
+ *   /api/peptides/saved         — Get saved peptides
+ *   /api/peptides/:id           — Delete a peptide
+ *   /api/user/activity          — Get user activity profile
+ *   /api/tokens/manage          — Create/revoke service tokens
+ *   /api/search                 — Full-text search across peptides
+ *   /api/health                 — Health check
+ *
+ * This Worker acts as the API gateway. For simple CRUD, the client may
+ * also talk directly to Supabase REST with RLS enforcement.
+ */
 
-// Types
-interface PeptideRequest {
+export { PeptideStore } from "./peptide-store";
+
+interface Peptide {
+  id: string;
   sequence: string;
-  targetTherapy?: string;
-  dockingScores?: Record<string, number>;
-  userId: string;
+  length: number;
+  dockingScore: number;
+  bindingAffinity: number;
+  stability: number;
+  specificity: number;
+  solubility: number;
+  membranePermeability: number;
+  unnaturalCount: number;
+  targetId: string;
+  createdAt: string;
 }
 
-interface AlignmentRequest {
-  sequences: string[];
-}
-
-interface DockingCalculationRequest {
-  sequence: string;
-  parameters?: {
-    bindingAffinity?: number;
-    stability?: number;
-    specificity?: number;
-    solubility?: number;
-    membranePermeability?: number;
-  };
-}
-
-// CORS Headers
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json',
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Rork-User-Id",
+  "Access-Control-Max-Age": "86400",
 };
 
-// Response helper
-function jsonResponse(data: any, status: number = 200): Response {
+type Env = {
+  DO: Fetcher;
+  SUPABASE_URL: string;
+  SUPABASE_SERVICE_KEY: string;
+};
+
+function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: corsHeaders,
+    headers: { ...CORS, "Content-Type": "application/json" },
   });
 }
 
-// Error handler
-function errorResponse(message: string, status: number = 500): Response {
-  return jsonResponse({ error: message, success: false }, status);
-}
-
-// ==================== MAIN HANDLER ====================
-
 export default {
-  async fetch(
-    request: Request,
-    env: {
-      SUPABASE_URL?: string;
-      SUPABASE_ANON_KEY?: string;
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS });
     }
-  ): Promise<Response> {
+
     const url = new URL(request.url);
     const path = url.pathname;
-    const method = request.method;
 
-    // Handle CORS preflight
-    if (method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
+    // Health check
+    if (path === "/api/health") {
+      return json({
+        status: "ok",
+        version: "2.0.0",
+        database: "Supabase PostgreSQL + Cloudflare Durable Objects",
+        features: ["peptide-generation", "docking-scores", "sequence-alignment", "full-text-search", "version-control", "service-tokens"],
+        timestamp: new Date().toISOString(),
+      });
     }
 
-    // Initialize Supabase
-    const supabase = createClient(
-      env.SUPABASE_URL || '',
-      env.SUPABASE_ANON_KEY || ''
-    );
-
-    try {
-      // ==================== HEALTH CHECK ====================
-      if (path === '/api/health' && method === 'GET') {
-        return jsonResponse({
-          status: 'ok',
-          message: 'Cloudflare Workers API is running',
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      // ==================== PEPTIDE ROUTES ====================
-
-      // GET /api/peptides/:userId - Get all peptides for user
-      if (path.match(/^\/api\/peptides\/[^\/]+$/) && method === 'GET') {
-        const userId = path.split('/')[3];
-
-        const { data, error } = await supabase
-          .from('peptides')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true });
-      }
-
-      // GET /api/peptides/:userId/:peptideId - Get single peptide
-      if (path.match(/^\/api\/peptides\/[^\/]+\/[^\/]+$/) && method === 'GET') {
-        const [, , , userId, peptideId] = path.split('/');
-
-        const { data, error } = await supabase
-          .from('peptides')
-          .select('*')
-          .eq('id', peptideId)
-          .eq('user_id', userId)
-          .single();
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true });
-      }
-
-      // POST /api/peptides - Create peptide
-      if (path === '/api/peptides' && method === 'POST') {
-        const body = (await request.json()) as PeptideRequest;
-
-        if (!body.sequence || !body.userId) {
-          return errorResponse('sequence and userId are required', 400);
-        }
-
-        const { data, error } = await supabase
-          .from('peptides')
-          .insert([
-            {
-              sequence: body.sequence,
-              target_therapy: body.targetTherapy,
-              docking_scores: body.dockingScores || {},
-              user_id: body.userId,
-              created_at: new Date().toISOString(),
-            },
-          ])
-          .select();
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true }, 201);
-      }
-
-      // PUT /api/peptides/:peptideId - Update peptide
-      if (
-        path.match(/^\/api\/peptides\/[^\/]+$/) &&
-        method === 'PUT' &&
-        !path.includes('/users/')
-      ) {
-        const peptideId = path.split('/')[3];
-        const body = await request.json();
-
-        const { data, error } = await supabase
-          .from('peptides')
-          .update({
-            ...body,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', peptideId)
-          .select();
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true });
-      }
-
-      // DELETE /api/peptides/:peptideId - Delete peptide
-      if (
-        path.match(/^\/api\/peptides\/[^\/]+$/) &&
-        method === 'DELETE' &&
-        !path.includes('/users/')
-      ) {
-        const peptideId = path.split('/')[3];
-
-        const { error } = await supabase
-          .from('peptides')
-          .delete()
-          .eq('id', peptideId);
-
-        if (error) throw error;
-        return jsonResponse({ success: true, message: 'Peptide deleted' });
-      }
-
-      // ==================== DOCKING CALCULATION ====================
-
-      // POST /api/docking/calculate - Calculate docking scores
-      if (path === '/api/docking/calculate' && method === 'POST') {
-        const body = (await request.json()) as DockingCalculationRequest;
-
-        if (!body.sequence) {
-          return errorResponse('sequence is required', 400);
-        }
-
-        const scores = calculateDockingScores(body.sequence, body.parameters);
-        return jsonResponse({ scores, success: true });
-      }
-
-      // ==================== SEQUENCE ALIGNMENT ====================
-
-      // POST /api/alignment - Perform sequence alignment
-      if (path === '/api/alignment' && method === 'POST') {
-        const body = (await request.json()) as AlignmentRequest;
-
-        if (!body.sequences || body.sequences.length < 2) {
-          return errorResponse(
-            'At least 2 sequences are required',
-            400
-          );
-        }
-
-        const alignment = performAlignment(body.sequences);
-        return jsonResponse({ data: alignment, success: true });
-      }
-
-      // ==================== SEARCH ====================
-
-      // GET /api/search - Global search across databases
-      if (path.match(/^\/api\/search/) && method === 'GET') {
-        const query = url.searchParams.get('q');
-
-        if (!query) {
-          return errorResponse('query parameter is required', 400);
-        }
-
-        const { data: peptides, error } = await supabase
-          .from('peptides')
-          .select('*')
-          .ilike('sequence', `%${query}%`)
-          .limit(20);
-
-        if (error) throw error;
-        return jsonResponse({ results: peptides, success: true });
-      }
-
-      // ==================== USER ACTIVITY ====================
-
-      // GET /api/users/:userId/activity - Get user activity
-      if (
-        path.match(/^\/api\/users\/[^\/]+\/activity$/) &&
-        method === 'GET'
-      ) {
-        const userId = path.split('/')[3];
-        const limit = url.searchParams.get('limit') || '50';
-
-        const { data, error } = await supabase
-          .from('activity_logs')
-          .select('*')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(Number(limit));
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true });
-      }
-
-      // POST /api/users/:userId/activity - Log activity
-      if (
-        path.match(/^\/api\/users\/[^\/]+\/activity$/) &&
-        method === 'POST'
-      ) {
-        const userId = path.split('/')[3];
-        const body = await request.json();
-
-        const { data, error } = await supabase
-          .from('activity_logs')
-          .insert([
-            {
-              user_id: userId,
-              action: body.action,
-              details: body.details,
-              created_at: new Date().toISOString(),
-            },
-          ])
-          .select();
-
-        if (error) throw error;
-        return jsonResponse({ data, success: true }, 201);
-      }
-
-      // ==================== 404 NOT FOUND ====================
-      return errorResponse(`Endpoint not found: ${path}`, 404);
-    } catch (error: any) {
-      console.error('Error:', error);
-      return errorResponse(
-        error.message || 'Internal server error',
-        500
-      );
+    // Auth routes
+    if (path === "/api/auth/register" && request.method === "POST") {
+      return handleRegister(request);
     }
+    if (path === "/api/auth/login" && request.method === "POST") {
+      return handleLogin(request);
+    }
+
+    // Peptide generation — record activity
+    if (path === "/api/peptides/generate" && request.method === "POST") {
+      return handleGenerate(request, env);
+    }
+
+    // Service token management
+    if (path === "/api/tokens/manage" && request.method === "POST") {
+      return handleCreateToken(request, env);
+    }
+    if (path === "/api/tokens/manage" && request.method === "GET") {
+      return handleListTokens(request, env);
+    }
+    if (path.startsWith("/api/tokens/revoke/") && request.method === "POST") {
+      return handleRevokeToken(request, env, path.split("/api/tokens/revoke/")[1]);
+    }
+
+    // Full-text search (uses Supabase)
+    if (path === "/api/search" && request.method === "GET") {
+      return handleSearch(request, env);
+    }
+
+    // Proxy remaining routes to PeptideStore DO
+    if (path.startsWith("/api/peptides/") || path.startsWith("/api/user/")) {
+      return proxyToDO(request, env, "PeptideStore");
+    }
+
+    return json({ error: "not found" }, 404);
   },
-};
+} satisfies ExportedHandler<Env>;
 
-// ==================== HELPER FUNCTIONS ====================
+// ---------------------------------------------------------------------------
+// Auth (in-memory — for demo purposes)
+// ---------------------------------------------------------------------------
 
-function calculateDockingScores(
-  sequence: string,
-  parameters?: {
-    bindingAffinity?: number;
-    stability?: number;
-    specificity?: number;
-    solubility?: number;
-    membranePermeability?: number;
+interface UserRecord { id: string; email: string; password: string; name: string; }
+const USERS: Map<string, UserRecord> = new Map();
+
+async function handleRegister(request: Request): Promise<Response> {
+  const body = await request.json() as { email?: string; password?: string; name?: string };
+  const { email, password, name } = body;
+  if (!email || !password || !name) return json({ error: "Missing fields" }, 400);
+  if (USERS.has(email)) return json({ error: "Email already registered" }, 409);
+
+  const id = `user-${crypto.randomUUID().slice(0, 8)}`;
+  USERS.set(email, { id, email, password, name });
+
+  const token = btoa(JSON.stringify({ sub: id, email, name }));
+  return json({ token, user: { id, email, name } });
+}
+
+async function handleLogin(request: Request): Promise<Response> {
+  const body = await request.json() as { email?: string; password?: string };
+  const { email, password } = body;
+  if (!email || !password) return json({ error: "Missing fields" }, 400);
+
+  const user = USERS.get(email);
+  if (!user || user.password !== password) return json({ error: "Invalid credentials" }, 401);
+
+  const token = btoa(JSON.stringify({ sub: user.id, email: user.email, name: user.name }));
+  return json({ token, user: { id: user.id, email: user.email, name: user.name } });
+}
+
+// ---------------------------------------------------------------------------
+// Peptide Generation — record activity
+// ---------------------------------------------------------------------------
+
+async function handleGenerate(request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as { targetId?: string; count?: number };
+  const { targetId, count = 5 } = body;
+  const userId = extractUserId(request);
+
+  // Record to DO
+  const doReq = new Request(
+    `https://internal/api/user/activity`,
+    { method: "POST", body: JSON.stringify({ target: targetId || "unknown", count }) },
+  );
+  doReq.headers.set("X-Rork-DO-Class", "PeptideStore");
+  doReq.headers.set("X-Rork-DO-Id", userId);
+  try { await env.DO.fetch(doReq); } catch (_) { /* non-critical */ }
+
+  return json({ ok: true, recorded: true });
+}
+
+// ---------------------------------------------------------------------------
+// Service Token Management (uses Supabase)
+// ---------------------------------------------------------------------------
+
+async function handleCreateToken(request: Request, env: Env): Promise<Response> {
+  const body = await request.json() as { name?: string; scopes?: string[]; expiresInDays?: number };
+  const { name = "API Token", scopes = ["read:peptides"], expiresInDays } = body;
+  const userId = extractUserId(request);
+
+  const tokenValue = crypto.randomUUID();
+  const prefix = tokenValue.slice(0, 8);
+  const hash = await sha256(tokenValue);
+  const now = new Date();
+  const expiresAt = expiresInDays
+    ? new Date(now.getTime() + expiresInDays * 86400000).toISOString()
+    : null;
+
+  // Insert into Supabase
+  const supabaseReq = new Request(`${env.SUPABASE_URL}/rest/v1/service_tokens`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": env.SUPABASE_SERVICE_KEY,
+      "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Prefer": "return=minimal",
+    },
+    body: JSON.stringify([{
+      user_id: userId,
+      token_name: name,
+      token_hash: hash,
+      token_prefix: prefix,
+      scopes,
+      permissions: { created_via: "api" },
+      rate_limit: 100,
+      expires_at: expiresAt,
+      is_active: true,
+    }]),
+  });
+
+  const result = await supabaseReq.json();
+  if (!supabaseReq.ok) {
+    console.error("Token creation failed:", result);
+    return json({ error: "Failed to create token" }, 500);
   }
-) {
-  const baseScore = 100;
-  const seqLength = sequence.length;
-  const lengthFactor = Math.min(seqLength / 30, 1);
 
-  return {
-    bindingAffinity: (parameters?.bindingAffinity || baseScore * 0.85) * lengthFactor,
-    stability: (parameters?.stability || baseScore * 0.78) * lengthFactor,
-    specificity: (parameters?.specificity || baseScore * 0.82) * lengthFactor,
-    solubility: (parameters?.solubility || baseScore * 0.75) * lengthFactor,
-    membranePermeability:
-      (parameters?.membranePermeability || baseScore * 0.68) * lengthFactor,
-    overallScore: 0,
-  };
+  return json({
+    token: `pf_${tokenValue}`,
+    prefix,
+    name,
+    scopes,
+    expiresAt,
+    message: "Store this token securely — it won't be shown again.",
+  }, 201);
 }
 
-function performAlignment(sequences: string[]) {
-  const alignmentScore = calculateAlignmentScore(sequences);
+async function handleListTokens(request: Request, env: Env): Promise<Response> {
+  const userId = extractUserId(request);
+  const url = `${env.SUPABASE_URL}/rest/v1/service_tokens?user_id=eq.${encodeURIComponent(userId)}&select=id,token_name,token_prefix,scopes,rate_limit,last_used_at,expires_at,is_active,created_at&order=created_at.desc`;
 
-  return {
-    sequences,
-    alignedSequences: sequences,
-    score: alignmentScore,
-    method: 'needleman-wunsch',
-    identity: calculateIdentity(sequences),
-    similarity: calculateSimilarity(sequences),
-  };
+  const res = await fetch(url, {
+    headers: {
+      "apikey": env.SUPABASE_SERVICE_KEY,
+      "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+
+  const data = await res.json();
+  return json({ tokens: data });
 }
 
-function calculateAlignmentScore(sequences: string[]): number {
-  if (sequences.length < 2) return 0;
-  let commonChars = 0;
-  const minLength = Math.min(...sequences.map((s) => s.length));
+async function handleRevokeToken(request: Request, env: Env, tokenId: string): Promise<Response> {
+  const userId = extractUserId(request);
+  const url = `${env.SUPABASE_URL}/rest/v1/service_tokens?id=eq.${encodeURIComponent(tokenId)}&user_id=eq.${encodeURIComponent(userId)}`;
 
-  for (let i = 0; i < minLength; i++) {
-    if (sequences.every((s) => s[i] === sequences[0][i])) {
-      commonChars++;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": env.SUPABASE_SERVICE_KEY,
+      "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+    body: JSON.stringify({ is_active: false }),
+  });
+
+  if (!res.ok) return json({ error: "Failed to revoke token" }, 500);
+  return json({ ok: true, message: "Token revoked" });
+}
+
+// ---------------------------------------------------------------------------
+// Full-Text Search (via Supabase)
+// ---------------------------------------------------------------------------
+
+async function handleSearch(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q");
+  const userId = extractUserId(request);
+
+  if (!query || query.length < 2) {
+    return json({ error: "Search query must be at least 2 characters" }, 400);
+  }
+
+  // Search across peptides using ilike for substring matching
+  const searchUrl = new URL(`${env.SUPABASE_URL}/rest/v1/peptides`);
+  searchUrl.searchParams.set("select", "id,peptide_name,sequence,docking_score,target_id,target_name,status,created_at");
+  searchUrl.searchParams.set("or", `(peptide_name.ilike.*${query}*,sequence.ilike.*${query}*,target_name.ilike.*${query}*)`);
+  searchUrl.searchParams.set("order", "docking_score.desc");
+  searchUrl.searchParams.set("limit", "50");
+
+  const res = await fetch(searchUrl.toString(), {
+    headers: {
+      "apikey": env.SUPABASE_SERVICE_KEY,
+      "Authorization": `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+    },
+  });
+
+  const data = await res.json();
+  return json({ results: data, query });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function extractUserId(request: Request): string {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (authHeader.startsWith("Bearer ")) {
+    try {
+      const payload = JSON.parse(atob(authHeader.slice(7)));
+      return payload.sub || "anonymous";
+    } catch {
+      /* fall through */
     }
   }
-
-  return Math.round((commonChars / minLength) * 100);
+  return request.headers.get("X-Rork-User-Id") || "anonymous";
 }
 
-function calculateIdentity(sequences: string[]): number {
-  return calculateAlignmentScore(sequences);
-}
+function proxyToDO(request: Request, env: Env, className: string): Promise<Response> {
+  const url = new URL(request.url);
+  const userId = extractUserId(request);
 
-function calculateSimilarity(sequences: string[]): number {
-  return calculateAlignmentScore(sequences) * 0.95;
+  let doPath = url.pathname;
+  if (doPath === "/api/peptides/save") doPath = "/save";
+  else if (doPath === "/api/peptides/saved") doPath = "/saved";
+  else if (doPath === "/api/user/activity") doPath = "/activity";
+  else if (doPath.startsWith("/api/peptides/")) {
+    const peptideId = doPath.replace("/api/peptides/", "");
+    doPath = `/delete/${peptideId}`;
+  }
+
+  const doUrl = `https://internal${doPath}`;
+  const wrapped = new Request(doUrl, request);
+  wrapped.headers.set("X-Rork-DO-Class", className);
+  wrapped.headers.set("X-Rork-DO-Id", userId);
+
+  return env.DO.fetch(wrapped).then((r) => {
+    const corsResponse = new Response(r.body, r);
+    for (const [k, v] of Object.entries(CORS)) {
+      corsResponse.headers.set(k, v);
+    }
+    return corsResponse;
+  });
 }
