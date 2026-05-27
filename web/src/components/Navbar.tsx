@@ -89,20 +89,9 @@ export function Navbar() {
           </div>
 
           {/* Auth */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-3">
             {user ? (
               <>
-                {!subscribed ? (
-                  <Link to="/subscribe">
-                    <Button size="sm" className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-semibold">
-                      <Crown className="w-3.5 h-3.5 mr-1" /> ₹2000
-                    </Button>
-                  </Link>
-                ) : (
-                  <div className="flex items-center gap-1 px-2 py-1 rounded-md bg-[#00d4aa]/10 border border-[#00d4aa]/30 text-[#00d4aa] text-[10px] font-semibold">
-                    <Crown className="w-3 h-3" /> PRO
-                  </div>
-                )}
                 <Link
                   to="/profile"
                   className={cn(
@@ -113,12 +102,12 @@ export function Navbar() {
                   )}
                 >
                   <User className="w-4 h-4" />
-                  <span className="max-w-[100px] truncate">{user.name || user.email}</span>
+                  {user.name || user.email}
                 </Link>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { logEvent("logout", `Signed out: ${user.email}`, user.email); signOut(); }}
+                  onClick={signOut}
                   className="text-muted-foreground hover:text-red-400"
                 >
                   <LogOut className="w-4 h-4" />
@@ -136,9 +125,6 @@ export function Navbar() {
                 </Button>
               </Link>
             )}
-            <Link to="/admin" className="text-muted-foreground/60 hover:text-red-300 p-1.5" title="Admin Console">
-              <Shield className="w-4 h-4" />
-            </Link>
           </div>
 
           {/* Mobile toggle */}

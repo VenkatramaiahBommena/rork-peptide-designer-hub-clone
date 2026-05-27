@@ -54,7 +54,6 @@ interface AuthContextType {
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
-  signInWithGoogle: (gmail: string, name?: string) => Promise<void>;
   signOut: () => void;
   clearError: () => void;
   getToken: () => string | null;
@@ -125,32 +124,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const signInWithGoogle = useCallback(async (gmail: string, name?: string) => {
-    setIsSigningIn(true);
-    setError(null);
-    try {
-      const normalized = gmail.trim().toLowerCase();
-      if (!/^[a-z0-9._%+-]+@gmail\.com$/.test(normalized)) {
-        throw new Error("Please enter a valid Gmail address (must end with @gmail.com)");
-      }
-      const userData: User = {
-        id: `google_${btoa(normalized).replace(/=/g, "")}`,
-        email: normalized,
-        name: name || normalized.split("@")[0],
-      };
-      const token = btoa(
-        JSON.stringify({ sub: userData.id, email: userData.email, name: userData.name, provider: "google" }),
-      );
-      localStorage.setItem(ACCESS_TOKEN_KEY, token);
-      setUser(userData);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Google sign-in failed");
-      throw e;
-    } finally {
-      setIsSigningIn(false);
-    }
-  }, []);
-
   const signOut = useCallback(() => {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -160,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const getToken = useCallback(() => localStorage.getItem(ACCESS_TOKEN_KEY), []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isSigningIn, error, signIn, register, signInWithGoogle, signOut, clearError, getToken }}>
+    <AuthContext.Provider value={{ user, isLoading, isSigningIn, error, signIn, register, signOut, clearError, getToken }}>
       {children}
     </AuthContext.Provider>
   );

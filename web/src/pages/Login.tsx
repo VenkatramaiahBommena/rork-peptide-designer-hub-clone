@@ -6,8 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
-import { useSubscription } from "@/hooks/useSubscription";
-import { BRAND } from "@/lib/brand";
 import {
   Dna,
   Mail,
@@ -22,20 +20,16 @@ import {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { user, isLoading, isSigningIn, error, signIn, register, signInWithGoogle, clearError } = useAuth();
-  const { logEvent, isSubscribed } = useSubscription();
+  const { user, isLoading, isSigningIn, error, signIn, register, clearError } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [showGoogle, setShowGoogle] = useState(false);
-  const [gmail, setGmail] = useState("");
-  const [googleName, setGoogleName] = useState("");
 
   // Redirect if already logged in
   if (user && !isLoading) {
-    navigate(isSubscribed(user.email) ? "/profile" : "/subscribe", { replace: true });
+    navigate("/profile", { replace: true });
     return null;
   }
 
@@ -46,21 +40,10 @@ export default function Login() {
     } else {
       await register(email, password, name);
     }
+    // If successful, redirect
     const token = localStorage.getItem("rork:access_token");
     if (token) {
-      logEvent(mode === "login" ? "login" : "signup", `${mode === "login" ? "Signed in" : "Registered"} as ${email}`, email);
-      navigate("/subscribe");
-    }
-  };
-
-  const handleGoogle = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await signInWithGoogle(gmail, googleName);
-      logEvent("login", `Google sign-in: ${gmail}`, gmail, { provider: "google" });
-      navigate("/subscribe");
-    } catch {
-      logEvent("error", `Google sign-in failed for ${gmail}`, gmail);
+      navigate("/profile");
     }
   };
 
@@ -108,64 +91,8 @@ export default function Login() {
           </p>
         </div>
 
-        <div className="text-center text-xs text-muted-foreground mb-3">{BRAND.company}</div>
         <Card className="glass-card">
           <CardContent className="p-6">
-            {/* Google Sign-in */}
-            {!showGoogle ? (
-              <Button
-                type="button"
-                onClick={() => { setShowGoogle(true); clearError(); }}
-                variant="outline"
-                className="w-full h-11 bg-white hover:bg-white/90 text-[#1f1f1f] border-white/20 font-medium mb-4"
-              >
-                <svg className="w-4 h-4 mr-2" viewBox="0 0 48 48">
-                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4C12.9 4 4 12.9 4 24s8.9 20 20 20s20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
-                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4C16.3 4 9.6 8.3 6.3 14.7z"/>
-                  <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.4l-6.5-5.5c-2 1.5-4.6 2.4-7.5 2.4c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
-                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.5 5.5c-.5.4 6.9-5 6.9-15.2c0-1.3-.1-2.4-.4-3.5z"/>
-                </svg>
-                Continue with Google
-              </Button>
-            ) : (
-              <form onSubmit={handleGoogle} className="space-y-3 mb-4 p-4 rounded-xl bg-white/5 border border-white/10">
-                <div className="flex items-center gap-2 mb-1">
-                  <svg className="w-4 h-4" viewBox="0 0 48 48">
-                    <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4C12.9 4 4 12.9 4 24s8.9 20 20 20s20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4C16.3 4 9.6 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.4l-6.5-5.5c-2 1.5-4.6 2.4-7.5 2.4c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.2 5.7l6.5 5.5c-.5.4 6.9-5 6.9-15.2c0-1.3-.1-2.4-.4-3.5z"/>
-                  </svg>
-                  <span className="text-sm font-medium">Sign in with your Google account</span>
-                </div>
-                <Input
-                  value={googleName}
-                  onChange={(e) => setGoogleName(e.target.value)}
-                  placeholder="Full name (optional)"
-                  className="bg-muted/30"
-                />
-                <Input
-                  type="email"
-                  value={gmail}
-                  onChange={(e) => setGmail(e.target.value)}
-                  placeholder="you@gmail.com"
-                  className="bg-muted/30"
-                  required
-                />
-                <div className="flex gap-2">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setShowGoogle(false)} className="flex-1">
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={isSigningIn} size="sm" className="flex-1 bg-[#4285F4] hover:bg-[#3b78e0] text-white">
-                    {isSigningIn ? "Signing in..." : "Continue"}
-                  </Button>
-                </div>
-              </form>
-            )}
-
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex-1 h-px bg-border/50" />
-              <span className="text-xs text-muted-foreground">or with email</span>
-              <div className="flex-1 h-px bg-border/50" />
-            </div>
-
             {/* Error display */}
             {error && (
               <motion.div
